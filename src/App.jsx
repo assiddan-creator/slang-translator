@@ -121,11 +121,30 @@ export default function App() {
         recognition.onresult = null;
         recognition.onerror = null;
         recognition.onend = null;
-        recognition.stop();
+        try {
+          recognition.stop();
+        } catch {
+          // Already stopped/released by browser.
+        }
       }
       recognitionRef.current = null;
     };
   }, []);
+
+  const cleanupRecognition = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    recognition.onstart = null;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try {
+      recognition.stop();
+    } catch {
+      // Ignore invalid state if recognition already ended.
+    }
+    recognitionRef.current = null;
+  };
 
   const showToast = (msg) => {
     setToast({ msg, show:true });
@@ -200,9 +219,7 @@ export default function App() {
 
     const recognition = recognitionRef.current;
     if (recognition) {
-      recognition.onend = null;
-      recognition.stop();
-      recognitionRef.current = null;
+      cleanupRecognition();
     }
 
     if (forceProcess) {
@@ -244,7 +261,10 @@ export default function App() {
     };
     r.onerror = (e) => {
       const msgs = {"not-allowed":"Allow microphone access","no-speech":"No speech detected","network":"Network error"};
-      setStatusText(msgs[e.error] || "Error: "+e.error); stopRec();
+      setStatusText(msgs[e.error] || "Error: "+e.error);
+      setIsRecording(false);
+      setIsListening(false);
+      stopRec();
     };
     r.onend = () => {
       setIsListening(false);
@@ -257,6 +277,7 @@ export default function App() {
           }
         }, 120);
       } else if (recognitionRef.current === r) {
+        setIsRecording(false);
         recognitionRef.current = null;
       }
     };
