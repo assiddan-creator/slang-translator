@@ -117,6 +117,7 @@ function startExternalRecording(lang, onFinal, onInterim, onError, onEnd) {
   recognitionInstance.lang = lang;
 
   recognitionInstance.onresult = (e) => {
+    if (!isGlobalRecording) return;
     let interimText = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
@@ -155,6 +156,9 @@ function startExternalRecording(lang, onFinal, onInterim, onError, onEnd) {
 function stopExternalRecording() {
   isGlobalRecording = false;
   if (recognitionInstance) {
+    recognitionInstance.onresult = null;
+    recognitionInstance.onend = null;
+    recognitionInstance.onerror = null;
     recognitionInstance.stop();
     recognitionInstance = null;
   }
