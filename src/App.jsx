@@ -101,6 +101,21 @@ function getResponsiveBackground(lang, isMobile, fallbackImage) {
   return fallbackImage;
 }
 
+let sharedRecognitionInstance = null;
+
+function getSharedRecognitionInstance() {
+  if (typeof window === "undefined") return null;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  if (!sharedRecognitionInstance) {
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    sharedRecognitionInstance = recognition;
+  }
+  return sharedRecognitionInstance;
+}
+
 function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -122,23 +137,18 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
     onFinalTranscriptRef.current = onFinalTranscript;
   }, [onFinalTranscript]);
 
-  const teardownRecognition = useCallback((withAbort = true) => {
+  const teardownRecognition = useCallback((shouldStop = true) => {
     const recognition = recognitionRef.current;
     if (!recognition) return;
     recognition.onstart = null;
     recognition.onresult = null;
     recognition.onerror = null;
     recognition.onend = null;
-    try {
-      recognition.stop();
-    } catch {
-      // Ignore invalid state when already stopped.
-    }
-    if (withAbort) {
+    if (shouldStop) {
       try {
-        if (typeof recognition.abort === "function") recognition.abort();
+        recognition.stop();
       } catch {
-        // Ignore invalid state when already aborted.
+        // Ignore invalid state when already stopped.
       }
     }
     recognitionRef.current = null;
@@ -165,21 +175,18 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   }, [teardownRecognition]);
 
   const start = useCallback(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
+    const recognition = getSharedRecognitionInstance();
+    if (!recognition) {
       setStatusText("Voice requires Chrome browser");
       return;
     }
 
     sessionIdRef.current += 1;
     const thisSession = sessionIdRef.current;
-    teardownRecognition(true);
+    teardownRecognition(false);
     interimRef.current = "";
     setInterim("");
 
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
     recognition.lang = inputLangRef.current;
     recognitionRef.current = recognition;
 
