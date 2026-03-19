@@ -1,4 +1,8 @@
-﻿import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import israelDesktop from "./assets/israel-desktop.jpeg";
+import israelMobile from "./assets/israel-mobile.jpeg";
+import ukDesktop from "./assets/uk-desktop.jpeg";
+import ukMobile from "./assets/uk-mobile.jpeg";
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -33,6 +37,29 @@ const INPUT_LANGS = [["he-IL","🇮🇱 Hebrew"],["en-US","🇺🇸 English"],["
 
 function getTheme(lang) { return THEMES[lang] || FALLBACK_THEME; }
 
+function useIsMobile() {
+  const getCurrent = () => (typeof window !== "undefined" ? window.innerWidth < 768 : false);
+  const [isMobile, setIsMobile] = useState(getCurrent);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  return isMobile;
+}
+
+function getResponsiveBackground(lang, isMobile, fallbackImage) {
+  if (lang === "Hebrew (Standard)") {
+    return isMobile ? israelMobile : israelDesktop;
+  }
+  if (lang === "English (Standard)" || lang === "English") {
+    return isMobile ? ukMobile : ukDesktop;
+  }
+  return fallbackImage;
+}
+
 export default function App() {
   const [inputLang, setInputLang] = useState("he-IL");
   const [outputLang, setOutputLang] = useState("English (Standard)");
@@ -49,6 +76,7 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [toast, setToast] = useState({ msg:"", show:false });
   const [imgReady, setImgReady] = useState(true);
+  const isMobile = useIsMobile();
 
   const recognitionRef = useRef(null);
   const isRecordingRef = useRef(false);
@@ -64,14 +92,15 @@ export default function App() {
   const showSlider = isPremium || mode === "slang";
   const sliderPct = ((slangLevel - 1) / 2) * 100;
   const isHebrewTheme = outputLang === "Hebrew (Standard)";
+  const backgroundImage = getResponsiveBackground(outputLang, isMobile, theme.image);
 
   useEffect(() => {
-    if (prevImg.current === theme.image) return;
+    if (prevImg.current === backgroundImage) return;
     setImgReady(false);
     const img = new Image();
-    img.src = theme.image;
-    img.onload = () => { setImgReady(true); prevImg.current = theme.image; };
-  }, [theme.image]);
+    img.src = backgroundImage;
+    img.onload = () => { setImgReady(true); prevImg.current = backgroundImage; };
+  }, [backgroundImage]);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -190,7 +219,7 @@ export default function App() {
 
   return (
     <div dir={isHebrewTheme ? "rtl" : "ltr"} style={{ minHeight:"100vh", position:"relative", fontFamily:"'Syne','Segoe UI',system-ui,sans-serif" }}>
-      <div style={{ position:"fixed", inset:0, zIndex:0, backgroundImage:`url(${T.image})`, backgroundSize:"cover", backgroundPosition:"center", opacity: imgReady ? 1 : 0, transition:"opacity 0.8s ease", filter:"brightness(0.22) saturate(1.15)" }} />
+      <div style={{ position:"fixed", inset:0, zIndex:0, backgroundImage:`url(${backgroundImage})`, backgroundPosition:"center", backgroundSize:"cover", opacity: imgReady ? 1 : 0, transition:"opacity 0.8s ease", filter:"brightness(0.22) saturate(1.15)" }} />
       <div style={{ position:"fixed", inset:0, zIndex:1, background:`radial-gradient(ellipse 120% 55% at 50% -10%, ${T.primary}28 0%, transparent 65%), linear-gradient(180deg, ${T.primary}14 0%, rgba(0,0,0,0.6) 100%)`, transition:"background 0.7s ease" }} />
       <div style={{ position:"relative", zIndex:2, padding:"20px 16px 52px", display:"flex", flexDirection:"column", alignItems:"center" }}>
         <div style={{ width:"100%", maxWidth:620, display:"flex", flexDirection:"column", gap:11 }}>
