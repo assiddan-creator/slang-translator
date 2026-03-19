@@ -82,6 +82,7 @@ export default function App() {
   const isRecordingRef = useRef(false);
   const shouldRestartRef = useRef(false);
   const restartTimeoutRef = useRef(null);
+  const activeSessionIdRef = useRef(0);
   const interimRef = useRef("");
   const hebrewRef = useRef("");
   const displayRef = useRef("");
@@ -140,6 +141,13 @@ export default function App() {
     recognition.onend = null;
     try {
       recognition.stop();
+    } catch {
+      // Ignore invalid state if recognition already ended.
+    }
+    try {
+      if (typeof recognition.abort === "function") {
+        recognition.abort();
+      }
     } catch {
       // Ignore invalid state if recognition already ended.
     }
@@ -214,13 +222,10 @@ export default function App() {
     // Immediately reflect stopped state in the UI on click.
     setIsRecording(false);
     setIsListening(false);
+    activeSessionIdRef.current += 1;
     shouldRestartRef.current = false;
     clearTimeout(restartTimeoutRef.current);
-
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      cleanupRecognition();
-    }
+    cleanupRecognition();
 
     if (forceProcess) {
       const pending = interimRef.current.trim();
@@ -242,10 +247,18 @@ export default function App() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setStatusText("Voice requires Chrome browser"); return; }
     clearTimeout(restartTimeoutRef.current);
+    const sessionId = activeSessionIdRef.current + 1;
+    activeSessionIdRef.current = sessionId;
     shouldRestartRef.current = true;
     const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = inputLang;
-    r.onstart = () => { setIsListening(true); setStatusText("Listening..."); };
+    recognitionRef.current = r;
+    r.onstart = () => {
+      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
+      setIsListening(true);
+      setStatusText("Listening...");
+    };
     r.onresult = async (e) => {
+      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
       let int = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i]; if (!res || !res[0]) continue;
@@ -260,13 +273,17 @@ export default function App() {
       setInterim(int);
     };
     r.onerror = (e) => {
+      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
       const msgs = {"not-allowed":"Allow microphone access","no-speech":"No speech detected","network":"Network error"};
       setStatusText(msgs[e.error] || "Error: "+e.error);
       setIsRecording(false);
       setIsListening(false);
-      stopRec();
+      shouldRestartRef.current = false;
+      clearTimeout(restartTimeoutRef.current);
+      cleanupRecognition();
     };
     r.onend = () => {
+      if (activeSessionIdRef.current !== sessionId) return;
       setIsListening(false);
       if (shouldRestartRef.current && isRecordingRef.current && recognitionRef.current === r) {
         restartTimeoutRef.current = setTimeout(() => {
@@ -281,7 +298,7 @@ export default function App() {
         recognitionRef.current = null;
       }
     };
-    try { r.start(); recognitionRef.current = r; setIsRecording(true); } catch (e) { setStatusText("Error: "+e.message); }
+    try { r.start(); setIsRecording(true); } catch (e) { setStatusText("Error: "+e.message); cleanupRecognition(); }
   };
 
   const copy = () => {
