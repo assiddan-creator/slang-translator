@@ -101,6 +101,151 @@ function getResponsiveBackground(lang, isMobile, fallbackImage) {
   return fallbackImage;
 }
 
+function useSpeechRecognition({ inputLang, onFinalTranscript }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [statusText, setStatusText] = useState("Ready — tap the mic to speak");
+
+  const recognitionRef = useRef(null);
+  const sessionIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  const inputLangRef = useRef(inputLang);
+  const onFinalTranscriptRef = useRef(onFinalTranscript);
+  const interimRef = useRef("");
+
+  useEffect(() => {
+    inputLangRef.current = inputLang;
+  }, [inputLang]);
+
+  useEffect(() => {
+    onFinalTranscriptRef.current = onFinalTranscript;
+  }, [onFinalTranscript]);
+
+  const teardownRecognition = useCallback((withAbort = true) => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    recognition.onstart = null;
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try {
+      recognition.stop();
+    } catch {
+      // Ignore invalid state when already stopped.
+    }
+    if (withAbort) {
+      try {
+        if (typeof recognition.abort === "function") recognition.abort();
+      } catch {
+        // Ignore invalid state when already aborted.
+      }
+    }
+    recognitionRef.current = null;
+  }, []);
+
+  const stop = useCallback(async (forceProcess = false) => {
+    sessionIdRef.current += 1;
+    if (mountedRef.current) {
+      setIsRecording(false);
+      setIsListening(false);
+    }
+    teardownRecognition(true);
+
+    const pendingInterim = interimRef.current.trim();
+    interimRef.current = "";
+    if (mountedRef.current) {
+      setInterim("");
+      setStatusText("Ready — tap the mic to speak");
+    }
+
+    if (forceProcess && pendingInterim) {
+      await onFinalTranscriptRef.current(pendingInterim);
+    }
+  }, [teardownRecognition]);
+
+  const start = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setStatusText("Voice requires Chrome browser");
+      return;
+    }
+
+    sessionIdRef.current += 1;
+    const thisSession = sessionIdRef.current;
+    teardownRecognition(true);
+    interimRef.current = "";
+    setInterim("");
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = inputLangRef.current;
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => {
+      if (!mountedRef.current || sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      setIsRecording(true);
+      setIsListening(true);
+      setStatusText("Listening...");
+    };
+
+    recognition.onresult = async (e) => {
+      if (!mountedRef.current || sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      let nextInterim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (!res || !res[0]) continue;
+        const transcript = (res[0].transcript || "").trim();
+        if (!transcript) continue;
+        if (res.isFinal) {
+          await onFinalTranscriptRef.current(transcript);
+        } else {
+          nextInterim = transcript;
+        }
+      }
+      interimRef.current = nextInterim;
+      if (mountedRef.current) setInterim(nextInterim);
+    };
+
+    recognition.onerror = (e) => {
+      if (!mountedRef.current || sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      const msgs = { "not-allowed": "Allow microphone access", "no-speech": "No speech detected", network: "Network error" };
+      setStatusText(msgs[e.error] || `Error: ${e.error}`);
+      void stop(false);
+    };
+
+    recognition.onend = () => {
+      if (!mountedRef.current || sessionIdRef.current !== thisSession) return;
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+      setIsRecording(false);
+      setIsListening(false);
+      interimRef.current = "";
+      setInterim("");
+      setStatusText("Ready — tap the mic to speak");
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      setStatusText(`Error: ${e.message}`);
+      void stop(false);
+    }
+  }, [stop, teardownRecognition]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      sessionIdRef.current += 1;
+      teardownRecognition(true);
+    };
+  }, [teardownRecognition]);
+
+  return { isRecording, isListening, interim, statusText, start, stop };
+}
+
 export default function App() {
   const [inputLang, setInputLang] = useState("he-IL");
   const [outputLang, setOutputLang] = useState("English (Standard)");
@@ -111,18 +256,10 @@ export default function App() {
   const [outputText, setOutputText] = useState("");
   const [dictHTML, setDictHTML] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [interim, setInterim] = useState("");
-  const [statusText, setStatusText] = useState("Ready — tap the mic to speak");
-  const [isListening, setIsListening] = useState(false);
   const [toast, setToast] = useState({ msg:"", show:false });
   const [imgReady, setImgReady] = useState(true);
   const isMobile = useIsMobile();
 
-  const recognitionRef = useRef(null);
-  const sessionIdRef = useRef(0);
-  const interimRef = useRef("");
-  const runtimeRef = useRef({ outputLang: "English (Standard)", mode: "standard", location: "", slangLevel: 2 });
   const hebrewRef = useRef("");
   const displayRef = useRef("");
   const toastTimer = useRef(null);
@@ -145,58 +282,7 @@ export default function App() {
     img.onload = () => { setImgReady(true); prevImg.current = backgroundImage; };
   }, [backgroundImage]);
 
-  useEffect(() => {
-    runtimeRef.current = { outputLang, mode, location, slangLevel };
-  }, [outputLang, mode, location, slangLevel]);
-
   useEffect(() => () => clearTimeout(toastTimer.current), []);
-
-  useEffect(() => {
-    return () => {
-      const recognition = recognitionRef.current;
-      if (recognition) {
-        recognition.onstart = null;
-        recognition.onresult = null;
-        recognition.onerror = null;
-        recognition.onend = null;
-        try {
-          recognition.stop();
-        } catch {
-          // Already stopped/released by browser.
-        }
-        try {
-          if (typeof recognition.abort === "function") recognition.abort();
-        } catch {
-          // Already closed.
-        }
-      }
-      recognitionRef.current = null;
-    };
-  }, []);
-
-  const cleanupRecognition = (withAbort = true) => {
-    const recognition = recognitionRef.current;
-    if (!recognition) return;
-    recognition.onstart = null;
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onend = null;
-    try {
-      recognition.stop();
-    } catch {
-      // Ignore invalid state if recognition already ended.
-    }
-    if (withAbort) {
-      try {
-        if (typeof recognition.abort === "function") {
-          recognition.abort();
-        }
-      } catch {
-        // Ignore invalid state if recognition already ended.
-      }
-    }
-    recognitionRef.current = null;
-  };
 
   const showToast = (msg) => {
     setToast({ msg, show: true });
@@ -247,23 +333,15 @@ export default function App() {
     }
   }, []);
 
-  const hardResetMic = () => {
-    sessionIdRef.current += 1;
-    setIsRecording(false);
-    setIsListening(false);
-    cleanupRecognition(true);
-  };
-
   const processFinalChunk = useCallback(async (chunk) => {
     const text = chunk.trim();
     if (!text) return;
     hebrewRef.current += text + " ";
     setInputText(hebrewRef.current);
-    const rt = runtimeRef.current;
-    const tr = await doTranslate(text, rt.outputLang, rt.mode, rt.location, rt.slangLevel);
+    const tr = await doTranslate(text, outputLang, mode, location, slangLevel);
     displayRef.current += (displayRef.current ? " " : "") + tr;
     setOutputText(displayRef.current);
-  }, [doTranslate]);
+  }, [doTranslate, outputLang, mode, location, slangLevel]);
 
   const handleOutput = async (val) => {
     setOutputLang(val);
@@ -285,99 +363,10 @@ export default function App() {
     setOutputText(tr);
   };
 
-  const buildRecognition = useCallback(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return null;
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = inputLang;
-    const thisSession = sessionIdRef.current;
-
-    recognition.onstart = () => {
-      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
-      setIsListening(true);
-      setStatusText("Listening...");
-    };
-
-    recognition.onresult = async (e) => {
-      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
-      let nextInterim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i];
-        if (!res || !res[0]) continue;
-        const transcript = res[0].transcript || "";
-        if (res.isFinal) {
-          await processFinalChunk(transcript);
-        } else {
-          nextInterim = transcript;
-        }
-      }
-      interimRef.current = nextInterim;
-      setInterim(nextInterim);
-    };
-
-    recognition.onerror = (e) => {
-      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
-      const msgs = { "not-allowed": "Allow microphone access", "no-speech": "No speech detected", network: "Network error" };
-      setStatusText(msgs[e.error] || `Error: ${e.error}`);
-      hardResetMic();
-    };
-
-    recognition.onend = () => {
-      if (sessionIdRef.current !== thisSession) return;
-      setIsListening(false);
-      if (recognitionRef.current === recognition) {
-        hardResetMic();
-      }
-    };
-
-    return recognition;
-  }, [inputLang, processFinalChunk]);
-
-  const stopRec = async (forceProcess = false) => {
-    setIsRecording(false);
-    setIsListening(false);
-    sessionIdRef.current += 1;
-    cleanupRecognition(true);
-
-    if (forceProcess) {
-      await processFinalChunk(interimRef.current);
-    }
-    interimRef.current = "";
-    setInterim("");
-    setStatusText("Ready — tap the mic to speak");
-  };
-
-  const startRec = () => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setStatusText("Voice requires Chrome browser"); return; }
-
-    cleanupRecognition(true);
-    sessionIdRef.current += 1;
-    interimRef.current = "";
-    setInterim("");
-
-    const recognition = buildRecognition();
-    if (!recognition) {
-      setStatusText("Voice requires Chrome browser");
-      return;
-    }
-    recognitionRef.current = recognition;
-    setIsRecording(true);
-    try {
-      recognition.start();
-    } catch (e) {
-      setStatusText(`Error: ${e.message}`);
-      hardResetMic();
-    }
-  };
-
-  useEffect(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.lang = inputLang;
-    }
-  }, [inputLang]);
+  const { isRecording, isListening, interim, statusText, start: startRec, stop: stopRec } = useSpeechRecognition({
+    inputLang,
+    onFinalTranscript: processFinalChunk,
+  });
 
   const copy = () => {
     const t = (displayRef.current || hebrewRef.current).trim();
@@ -387,7 +376,7 @@ export default function App() {
 
   const clear = () => {
     hebrewRef.current = ""; displayRef.current = "";
-    setInputText(""); setOutputText(""); setDictHTML(""); setInterim("");
+    setInputText(""); setOutputText(""); setDictHTML("");
   };
 
   const T = theme;
