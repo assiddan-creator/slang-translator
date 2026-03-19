@@ -80,6 +80,8 @@ export default function App() {
 
   const recognitionRef = useRef(null);
   const isRecordingRef = useRef(false);
+  const shouldRestartRef = useRef(false);
+  const restartTimeoutRef = useRef(null);
   const interimRef = useRef("");
   const hebrewRef = useRef("");
   const displayRef = useRef("");
@@ -108,6 +110,22 @@ export default function App() {
   }, [isRecording]);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(restartTimeoutRef.current);
+      shouldRestartRef.current = false;
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.stop();
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
 
   const showToast = (msg) => {
     setToast({ msg, show:true });
@@ -177,9 +195,12 @@ export default function App() {
     // Immediately reflect stopped state in the UI on click.
     setIsRecording(false);
     setIsListening(false);
+    shouldRestartRef.current = false;
+    clearTimeout(restartTimeoutRef.current);
 
     const recognition = recognitionRef.current;
     if (recognition) {
+      recognition.onend = null;
       recognition.stop();
       recognitionRef.current = null;
     }
@@ -203,6 +224,8 @@ export default function App() {
   const startRec = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setStatusText("Voice requires Chrome browser"); return; }
+    clearTimeout(restartTimeoutRef.current);
+    shouldRestartRef.current = true;
     const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = inputLang;
     r.onstart = () => { setIsListening(true); setStatusText("Listening..."); };
     r.onresult = async (e) => {
@@ -223,7 +246,20 @@ export default function App() {
       const msgs = {"not-allowed":"Allow microphone access","no-speech":"No speech detected","network":"Network error"};
       setStatusText(msgs[e.error] || "Error: "+e.error); stopRec();
     };
-    r.onend = () => { if (isRecordingRef.current) r.start(); };
+    r.onend = () => {
+      setIsListening(false);
+      if (shouldRestartRef.current && isRecordingRef.current && recognitionRef.current === r) {
+        restartTimeoutRef.current = setTimeout(() => {
+          try {
+            r.start();
+          } catch {
+            stopRec();
+          }
+        }, 120);
+      } else if (recognitionRef.current === r) {
+        recognitionRef.current = null;
+      }
+    };
     try { r.start(); recognitionRef.current = r; setIsRecording(true); } catch (e) { setStatusText("Error: "+e.message); }
   };
 
