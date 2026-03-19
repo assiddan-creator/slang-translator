@@ -3,6 +3,20 @@ import israelDesktop from "./assets/israel-desktop.jpeg";
 import israelMobile from "./assets/israel-mobile.jpeg";
 import ukDesktop from "./assets/uk-desktop.jpeg";
 import ukMobile from "./assets/uk-mobile.jpeg";
+import brazilDesktop from "./assets/brazil-desktop.jpeg";
+import brazilMobile from "./assets/brazil-mobile.jpeg";
+import franceDesktop from "./assets/france-desktop.jpeg";
+import franceMobile from "./assets/france-mobile.jpeg";
+import germanyDesktop from "./assets/germany-desktop.jpeg";
+import germanyMobile from "./assets/germany-mobile.jpeg";
+import japanDesktop from "./assets/japan-desktop.jpeg";
+import japanMobile from "./assets/japan-mobile.jpeg";
+import mexicoDesktop from "./assets/mexico-desktop.jpeg";
+import mexicoMobile from "./assets/mexico-mobile.jpeg";
+import russiaDesktop from "./assets/russia-desktop.png";
+import russiaMobile from "./assets/russia-mobile.jpeg";
+import spainDesktop from "./assets/spain-desktop.jpeg";
+import spainMobile from "./assets/spain-mobile.jpeg";
 
 const GEMINI_API_KEY = "AIzaSyCHmmmwldZRFwGzEW35er7UgOeWRW1sDkc";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -51,11 +65,38 @@ function useIsMobile() {
 }
 
 function getResponsiveBackground(lang, isMobile, fallbackImage) {
-  if (lang === "Hebrew (Standard)") {
-    return isMobile ? israelMobile : israelDesktop;
-  }
-  if (lang === "English (Standard)" || lang === "English") {
-    return isMobile ? ukMobile : ukDesktop;
+  const localeBackgrounds = {
+    israel: { desktop: israelDesktop, mobile: israelMobile },
+    uk: { desktop: ukDesktop, mobile: ukMobile },
+    brazil: { desktop: brazilDesktop, mobile: brazilMobile },
+    france: { desktop: franceDesktop, mobile: franceMobile },
+    germany: { desktop: germanyDesktop, mobile: germanyMobile },
+    japan: { desktop: japanDesktop, mobile: japanMobile },
+    mexico: { desktop: mexicoDesktop, mobile: mexicoMobile },
+    russia: { desktop: russiaDesktop, mobile: russiaMobile },
+    spain: { desktop: spainDesktop, mobile: spainMobile },
+  };
+
+  const langToRegion = {
+    "Hebrew (Standard)": "israel",
+    "English (Standard)": "uk",
+    English: "uk",
+    Portuguese: "brazil",
+    "Rio Favela": "brazil",
+    French: "france",
+    "Paris Banlieue": "france",
+    German: "germany",
+    Japanese: "japan",
+    "Tokyo Gyaru": "japan",
+    Spanish: "spain",
+    "Mexico City Barrio": "mexico",
+    Russian: "russia",
+    "Russian Street": "russia",
+  };
+
+  const region = langToRegion[lang];
+  if (region && localeBackgrounds[region]) {
+    return isMobile ? localeBackgrounds[region].mobile : localeBackgrounds[region].desktop;
   }
   return fallbackImage;
 }
@@ -82,8 +123,9 @@ export default function App() {
   const isRecordingRef = useRef(false);
   const shouldRestartRef = useRef(false);
   const restartTimeoutRef = useRef(null);
-  const activeSessionIdRef = useRef(0);
+  const sessionIdRef = useRef(0);
   const interimRef = useRef("");
+  const runtimeRef = useRef({ outputLang: "English (Standard)", mode: "standard", location: "", slangLevel: 2 });
   const hebrewRef = useRef("");
   const displayRef = useRef("");
   const toastTimer = useRef(null);
@@ -110,6 +152,10 @@ export default function App() {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
+  useEffect(() => {
+    runtimeRef.current = { outputLang, mode, location, slangLevel };
+  }, [outputLang, mode, location, slangLevel]);
+
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   useEffect(() => {
@@ -132,7 +178,7 @@ export default function App() {
     };
   }, []);
 
-  const cleanupRecognition = () => {
+  const cleanupRecognition = (withAbort = true) => {
     const recognition = recognitionRef.current;
     if (!recognition) return;
     recognition.onstart = null;
@@ -144,20 +190,22 @@ export default function App() {
     } catch {
       // Ignore invalid state if recognition already ended.
     }
-    try {
-      if (typeof recognition.abort === "function") {
-        recognition.abort();
+    if (withAbort) {
+      try {
+        if (typeof recognition.abort === "function") {
+          recognition.abort();
+        }
+      } catch {
+        // Ignore invalid state if recognition already ended.
       }
-    } catch {
-      // Ignore invalid state if recognition already ended.
     }
     recognitionRef.current = null;
   };
 
   const showToast = (msg) => {
-    setToast({ msg, show:true });
+    setToast({ msg, show: true });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast({ msg:"", show:false }), 2800);
+    toastTimer.current = setTimeout(() => setToast({ msg: "", show: false }), 2800);
   };
 
   const doTranslate = useCallback(async (text, lang, m, loc, level) => {
@@ -183,16 +231,16 @@ export default function App() {
       prompt = `${base}\nText: '''${text}'''${fmt}`;
     }
     try {
-      const res = await fetch(GEMINI_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:slangOn?1.0:0.2,maxOutputTokens:2048} }) });
+      const res = await fetch(GEMINI_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: slangOn ? 1.0 : 0.2, maxOutputTokens: 2048 } }) });
       const data = await res.json();
       const full = (data?.candidates?.[0]?.content?.parts?.[0]?.text || text).trim();
       const parts = full.split("|||");
       const translated = parts[0].trim();
       if (parts.length > 1 && parts[1].trim()) {
         const t = getTheme(lang);
-        let h = parts[1].trim().replace(/\*\*(.*?)\*\*/g,"$1");
+        let h = parts[1].trim().replace(/\*\*(.*?)\*\*/g, "$1");
         h = h.replace(/^(.*?)\s*-/gm, `<b style="color:${t.tag};font-weight:700">$1</b> -`);
-        h = h.replace(/\n/g,"<br>");
+        h = h.replace(/\n/g, "<br>");
         setDictHTML(h);
       }
       setIsTranslating(false);
@@ -203,41 +251,114 @@ export default function App() {
     }
   }, []);
 
+  const hardResetMic = () => {
+    shouldRestartRef.current = false;
+    clearTimeout(restartTimeoutRef.current);
+    setIsRecording(false);
+    setIsListening(false);
+    cleanupRecognition(true);
+  };
+
+  const processFinalChunk = useCallback(async (chunk) => {
+    const text = chunk.trim();
+    if (!text) return;
+    hebrewRef.current += text + " ";
+    setInputText(hebrewRef.current);
+    const rt = runtimeRef.current;
+    const tr = await doTranslate(text, rt.outputLang, rt.mode, rt.location, rt.slangLevel);
+    displayRef.current += (displayRef.current ? " " : "") + tr;
+    setOutputText(displayRef.current);
+  }, [doTranslate]);
+
   const handleOutput = async (val) => {
     setOutputLang(val);
     if (hebrewRef.current.trim()) {
       const tr = await doTranslate(hebrewRef.current, val, mode, location, slangLevel);
-      displayRef.current = tr; setOutputText(tr);
+      displayRef.current = tr;
+      setOutputText(tr);
     }
   };
 
   const handleTranslate = async () => {
-    if (!inputText.trim()) { showToast("No text to translate"); return; }
+    if (!inputText.trim()) {
+      showToast("No text to translate");
+      return;
+    }
     hebrewRef.current = inputText;
     const tr = await doTranslate(inputText, outputLang, mode, location, slangLevel);
-    displayRef.current = tr; setOutputText(tr);
+    displayRef.current = tr;
+    setOutputText(tr);
   };
 
+  const buildRecognition = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = inputLang;
+    const thisSession = sessionIdRef.current;
+
+    recognition.onstart = () => {
+      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      setIsListening(true);
+      setStatusText("Listening...");
+    };
+
+    recognition.onresult = async (e) => {
+      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      let nextInterim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (!res || !res[0]) continue;
+        const transcript = res[0].transcript || "";
+        if (res.isFinal) {
+          await processFinalChunk(transcript);
+        } else {
+          nextInterim = transcript;
+        }
+      }
+      interimRef.current = nextInterim;
+      setInterim(nextInterim);
+    };
+
+    recognition.onerror = (e) => {
+      if (sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
+      const msgs = { "not-allowed": "Allow microphone access", "no-speech": "No speech detected", network: "Network error" };
+      setStatusText(msgs[e.error] || `Error: ${e.error}`);
+      hardResetMic();
+    };
+
+    recognition.onend = () => {
+      if (sessionIdRef.current !== thisSession) return;
+      setIsListening(false);
+      if (shouldRestartRef.current && isRecordingRef.current && recognitionRef.current === recognition) {
+        restartTimeoutRef.current = setTimeout(() => {
+          try {
+            recognition.start();
+          } catch {
+            hardResetMic();
+          }
+        }, 120);
+      } else if (recognitionRef.current === recognition) {
+        hardResetMic();
+      }
+    };
+
+    return recognition;
+  }, [inputLang, processFinalChunk]);
+
   const stopRec = async (forceProcess = false) => {
-    // Immediately reflect stopped state in the UI on click.
     setIsRecording(false);
     setIsListening(false);
-    activeSessionIdRef.current += 1;
+    sessionIdRef.current += 1;
     shouldRestartRef.current = false;
     clearTimeout(restartTimeoutRef.current);
-    cleanupRecognition();
+    cleanupRecognition(true);
 
     if (forceProcess) {
-      const pending = interimRef.current.trim();
-      if (pending) {
-        hebrewRef.current += pending + " ";
-        setInputText(hebrewRef.current);
-        const tr = await doTranslate(pending, outputLang, mode, location, slangLevel);
-        displayRef.current += (displayRef.current ? " " : "") + tr;
-        setOutputText(displayRef.current);
-      }
+      await processFinalChunk(interimRef.current);
     }
-
     interimRef.current = "";
     setInterim("");
     setStatusText("Ready — tap the mic to speak");
@@ -246,60 +367,33 @@ export default function App() {
   const startRec = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setStatusText("Voice requires Chrome browser"); return; }
-    clearTimeout(restartTimeoutRef.current);
-    const sessionId = activeSessionIdRef.current + 1;
-    activeSessionIdRef.current = sessionId;
+
+    hardResetMic();
+    sessionIdRef.current += 1;
     shouldRestartRef.current = true;
-    const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = inputLang;
-    recognitionRef.current = r;
-    r.onstart = () => {
-      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
-      setIsListening(true);
-      setStatusText("Listening...");
-    };
-    r.onresult = async (e) => {
-      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
-      let int = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i]; if (!res || !res[0]) continue;
-        const t = res[0].transcript || "";
-        if (res.isFinal) {
-          hebrewRef.current += t + " "; setInputText(hebrewRef.current);
-          const tr = await doTranslate(t, outputLang, mode, location, slangLevel);
-          displayRef.current += (displayRef.current?" ":"") + tr; setOutputText(displayRef.current);
-        } else { int = t; }
-      }
-      interimRef.current = int;
-      setInterim(int);
-    };
-    r.onerror = (e) => {
-      if (activeSessionIdRef.current !== sessionId || recognitionRef.current !== r) return;
-      const msgs = {"not-allowed":"Allow microphone access","no-speech":"No speech detected","network":"Network error"};
-      setStatusText(msgs[e.error] || "Error: "+e.error);
-      setIsRecording(false);
-      setIsListening(false);
-      shouldRestartRef.current = false;
-      clearTimeout(restartTimeoutRef.current);
-      cleanupRecognition();
-    };
-    r.onend = () => {
-      if (activeSessionIdRef.current !== sessionId) return;
-      setIsListening(false);
-      if (shouldRestartRef.current && isRecordingRef.current && recognitionRef.current === r) {
-        restartTimeoutRef.current = setTimeout(() => {
-          try {
-            r.start();
-          } catch {
-            stopRec();
-          }
-        }, 120);
-      } else if (recognitionRef.current === r) {
-        setIsRecording(false);
-        recognitionRef.current = null;
-      }
-    };
-    try { r.start(); setIsRecording(true); } catch (e) { setStatusText("Error: "+e.message); cleanupRecognition(); }
+    interimRef.current = "";
+    setInterim("");
+
+    const recognition = buildRecognition();
+    if (!recognition) {
+      setStatusText("Voice requires Chrome browser");
+      return;
+    }
+    recognitionRef.current = recognition;
+    setIsRecording(true);
+    try {
+      recognition.start();
+    } catch (e) {
+      setStatusText(`Error: ${e.message}`);
+      hardResetMic();
+    }
   };
+
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = inputLang;
+    }
+  }, [inputLang]);
 
   const copy = () => {
     const t = (displayRef.current || hebrewRef.current).trim();
