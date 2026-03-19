@@ -117,6 +117,19 @@ function getGlobalRecognition() {
   return globalRecognition;
 }
 
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (globalRecognition) {
+      try {
+        globalRecognition.abort();
+      } catch {
+        // Ignore HMR disposal errors.
+      }
+    }
+    globalRecognition = null;
+  });
+}
+
 function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -146,10 +159,16 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
     onFinalTranscriptRef.current = onFinalTranscript;
   }, [onFinalTranscript]);
 
-  const teardownRecognition = useCallback((shouldStop = true) => {
+  const teardownRecognition = useCallback((forceAbort = true) => {
     const recognition = globalRecognition;
     clearRecognitionCallbacks();
-    if (shouldStop) {
+    if (forceAbort) {
+      try {
+        recognition.abort();
+      } catch {
+        // Ignore invalid state when already aborted.
+      }
+    } else {
       try {
         recognition.stop();
       } catch {
@@ -222,7 +241,11 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
 
     recognition.onerror = (e) => {
       if (!mountedRef.current || sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
-      const msgs = { "not-allowed": "Allow microphone access", "no-speech": "No speech detected", network: "Network error" };
+      const msgs = { "not-allowed": "Allow microphone access", "audio-capture": "Microphone unavailable", "no-speech": "No speech detected", network: "Network error" };
+      if (e.error === "not-allowed" || e.error === "audio-capture") {
+        setIsRecording(false);
+        setIsListening(false);
+      }
       setStatusText(msgs[e.error] || `Error: ${e.error}`);
       clearRecognitionCallbacks();
       recognitionRef.current = null;
