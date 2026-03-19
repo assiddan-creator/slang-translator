@@ -101,19 +101,20 @@ function getResponsiveBackground(lang, isMobile, fallbackImage) {
   return fallbackImage;
 }
 
-let sharedRecognitionInstance = null;
+let globalRecognition = null;
 
-function getSharedRecognitionInstance() {
+function getGlobalRecognition() {
   if (typeof window === "undefined") return null;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
   if (!SR) return null;
-  if (!sharedRecognitionInstance) {
+  if (!globalRecognition) {
     const recognition = new SR();
+    recognition.lang = "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
-    sharedRecognitionInstance = recognition;
+    globalRecognition = recognition;
   }
-  return sharedRecognitionInstance;
+  return globalRecognition;
 }
 
 function useSpeechRecognition({ inputLang, onFinalTranscript }) {
@@ -129,6 +130,14 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const interimRef = useRef("");
 
+  const clearRecognitionCallbacks = useCallback(() => {
+    if (!globalRecognition) return;
+    globalRecognition.onstart = null;
+    globalRecognition.onresult = null;
+    globalRecognition.onerror = null;
+    globalRecognition.onend = null;
+  }, []);
+
   useEffect(() => {
     inputLangRef.current = inputLang;
   }, [inputLang]);
@@ -138,12 +147,8 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   }, [onFinalTranscript]);
 
   const teardownRecognition = useCallback((shouldStop = true) => {
-    const recognition = recognitionRef.current;
-    if (!recognition) return;
-    recognition.onstart = null;
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onend = null;
+    const recognition = globalRecognition;
+    clearRecognitionCallbacks();
     if (shouldStop) {
       try {
         recognition.stop();
@@ -152,7 +157,7 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
       }
     }
     recognitionRef.current = null;
-  }, []);
+  }, [clearRecognitionCallbacks]);
 
   const stop = useCallback(async (forceProcess = false) => {
     sessionIdRef.current += 1;
@@ -175,7 +180,7 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
   }, [teardownRecognition]);
 
   const start = useCallback(() => {
-    const recognition = getSharedRecognitionInstance();
+    const recognition = getGlobalRecognition();
     if (!recognition) {
       setStatusText("Voice requires Chrome browser");
       return;
@@ -183,7 +188,7 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
 
     sessionIdRef.current += 1;
     const thisSession = sessionIdRef.current;
-    teardownRecognition(false);
+    clearRecognitionCallbacks();
     interimRef.current = "";
     setInterim("");
 
@@ -219,12 +224,17 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
       if (!mountedRef.current || sessionIdRef.current !== thisSession || recognitionRef.current !== recognition) return;
       const msgs = { "not-allowed": "Allow microphone access", "no-speech": "No speech detected", network: "Network error" };
       setStatusText(msgs[e.error] || `Error: ${e.error}`);
-      void stop(false);
+      clearRecognitionCallbacks();
+      recognitionRef.current = null;
+      setIsRecording(false);
+      setIsListening(false);
+      setInterim("");
     };
 
     recognition.onend = () => {
       if (!mountedRef.current || sessionIdRef.current !== thisSession) return;
       if (recognitionRef.current === recognition) {
+        clearRecognitionCallbacks();
         recognitionRef.current = null;
       }
       setIsRecording(false);
@@ -246,9 +256,10 @@ function useSpeechRecognition({ inputLang, onFinalTranscript }) {
     return () => {
       mountedRef.current = false;
       sessionIdRef.current += 1;
+      clearRecognitionCallbacks();
       teardownRecognition(true);
     };
-  }, [teardownRecognition]);
+  }, [clearRecognitionCallbacks, teardownRecognition]);
 
   return { isRecording, isListening, interim, statusText, start, stop };
 }
