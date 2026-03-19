@@ -18,8 +18,6 @@ import russiaMobile from "./assets/russia-mobile.jpeg";
 import spainDesktop from "./assets/spain-desktop.jpeg";
 import spainMobile from "./assets/spain-mobile.jpeg";
 
-const GEMINI_API_KEY = "AIzaSyCHmmmwldZRFwGzEW35er7UgOeWRW1sDkc";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 const SLIDER_LABELS = { 1: "Light", 2: "Medium", 3: "Hardcore" };
 
 const THEMES = {
@@ -219,10 +217,12 @@ export default function App() {
 
   const doTranslate = useCallback(async (text, lang, m, loc, level) => {
     if (!text.trim()) return "";
-    if (!GEMINI_API_KEY) {
-      showToast("Missing API key: set VITE_GEMINI_API_KEY");
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("API Key is missing in environment variables!");
       return text;
     }
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
     const isPrem = PREMIUM.includes(lang);
     const slangOn = m === "slang" || isPrem || loc.trim() !== "";
     const intensity = SLIDER_LABELS[level] || "Medium";
@@ -240,7 +240,7 @@ export default function App() {
       prompt = `${base}\nText: '''${text}'''${fmt}`;
     }
     try {
-      const res = await fetch(GEMINI_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: slangOn ? 1.0 : 0.2, maxOutputTokens: 2048 } }) });
+      const res = await fetch(geminiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: slangOn ? 1.0 : 0.2, maxOutputTokens: 2048 } }) });
       const data = await res.json();
       const full = (data?.candidates?.[0]?.content?.parts?.[0]?.text || text).trim();
       const parts = full.split("|||");
