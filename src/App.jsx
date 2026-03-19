@@ -4,7 +4,7 @@ import israelMobile from "./assets/israel-mobile.jpeg";
 import ukDesktop from "./assets/uk-desktop.jpeg";
 import ukMobile from "./assets/uk-mobile.jpeg";
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const GEMINI_API_KEY = "AIzaSyCHmmmwldZRFwGzEW35er7UgOeWRW1sDkc";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 const SLIDER_LABELS = { 1: "Light", 2: "Medium", 3: "Hardcore" };
 
@@ -80,6 +80,7 @@ export default function App() {
 
   const recognitionRef = useRef(null);
   const isRecordingRef = useRef(false);
+  const interimRef = useRef("");
   const hebrewRef = useRef("");
   const displayRef = useRef("");
   const toastTimer = useRef(null);
@@ -172,10 +173,31 @@ export default function App() {
     displayRef.current = tr; setOutputText(tr);
   };
 
-  const stopRec = () => {
-    setIsRecording(false); setIsListening(false);
-    if (recognitionRef.current) { recognitionRef.current.stop(); recognitionRef.current = null; }
-    setInterim(""); setStatusText("Ready — tap the mic to speak");
+  const stopRec = async (forceProcess = false) => {
+    // Immediately reflect stopped state in the UI on click.
+    setIsRecording(false);
+    setIsListening(false);
+
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.stop();
+      recognitionRef.current = null;
+    }
+
+    if (forceProcess) {
+      const pending = interimRef.current.trim();
+      if (pending) {
+        hebrewRef.current += pending + " ";
+        setInputText(hebrewRef.current);
+        const tr = await doTranslate(pending, outputLang, mode, location, slangLevel);
+        displayRef.current += (displayRef.current ? " " : "") + tr;
+        setOutputText(displayRef.current);
+      }
+    }
+
+    interimRef.current = "";
+    setInterim("");
+    setStatusText("Ready — tap the mic to speak");
   };
 
   const startRec = () => {
@@ -194,6 +216,7 @@ export default function App() {
           displayRef.current += (displayRef.current?" ":"") + tr; setOutputText(displayRef.current);
         } else { int = t; }
       }
+      interimRef.current = int;
       setInterim(int);
     };
     r.onerror = (e) => {
@@ -286,7 +309,7 @@ export default function App() {
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10, paddingBottom:14 }}>
               <div style={{ position:"relative" }}>
                 {isRecording && <div style={{ position:"absolute", inset:-10, borderRadius:"50%", border:`2px solid ${T.primary}`, animation:"pulseRing 1.3s ease-out infinite", opacity:0.8 }} />}
-                <button onClick={isRecording ? stopRec : startRec} style={{ width:84, height:84, borderRadius:"50%", border:`2px solid ${isRecording ? T.primary : "rgba(255,255,255,0.14)"}`, background: isRecording ? `radial-gradient(circle, ${T.primary}30, ${T.primary}0c)` : "rgba(255,255,255,0.05)", fontSize:"2rem", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.3s ease", boxShadow: isRecording ? `0 0 28px ${T.primary}55` : "none" }}>
+                <button onClick={isRecording ? () => stopRec(true) : startRec} style={{ width:84, height:84, borderRadius:"50%", border:`2px solid ${isRecording ? T.primary : "rgba(255,255,255,0.14)"}`, background: isRecording ? `radial-gradient(circle, ${T.primary}30, ${T.primary}0c)` : "rgba(255,255,255,0.05)", fontSize:"2rem", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.3s ease", boxShadow: isRecording ? `0 0 28px ${T.primary}55` : "none" }}>
                   {isRecording ? "⏹️" : "🎤"}
                 </button>
               </div>
