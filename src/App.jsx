@@ -120,9 +120,6 @@ export default function App() {
   const isMobile = useIsMobile();
 
   const recognitionRef = useRef(null);
-  const isRecordingRef = useRef(false);
-  const shouldRestartRef = useRef(false);
-  const restartTimeoutRef = useRef(null);
   const sessionIdRef = useRef(0);
   const interimRef = useRef("");
   const runtimeRef = useRef({ outputLang: "English (Standard)", mode: "standard", location: "", slangLevel: 2 });
@@ -149,10 +146,6 @@ export default function App() {
   }, [backgroundImage]);
 
   useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
-
-  useEffect(() => {
     runtimeRef.current = { outputLang, mode, location, slangLevel };
   }, [outputLang, mode, location, slangLevel]);
 
@@ -160,8 +153,6 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      clearTimeout(restartTimeoutRef.current);
-      shouldRestartRef.current = false;
       const recognition = recognitionRef.current;
       if (recognition) {
         recognition.onstart = null;
@@ -172,6 +163,11 @@ export default function App() {
           recognition.stop();
         } catch {
           // Already stopped/released by browser.
+        }
+        try {
+          if (typeof recognition.abort === "function") recognition.abort();
+        } catch {
+          // Already closed.
         }
       }
       recognitionRef.current = null;
@@ -252,8 +248,7 @@ export default function App() {
   }, []);
 
   const hardResetMic = () => {
-    shouldRestartRef.current = false;
-    clearTimeout(restartTimeoutRef.current);
+    sessionIdRef.current += 1;
     setIsRecording(false);
     setIsListening(false);
     cleanupRecognition(true);
@@ -332,15 +327,7 @@ export default function App() {
     recognition.onend = () => {
       if (sessionIdRef.current !== thisSession) return;
       setIsListening(false);
-      if (shouldRestartRef.current && isRecordingRef.current && recognitionRef.current === recognition) {
-        restartTimeoutRef.current = setTimeout(() => {
-          try {
-            recognition.start();
-          } catch {
-            hardResetMic();
-          }
-        }, 120);
-      } else if (recognitionRef.current === recognition) {
+      if (recognitionRef.current === recognition) {
         hardResetMic();
       }
     };
@@ -352,8 +339,6 @@ export default function App() {
     setIsRecording(false);
     setIsListening(false);
     sessionIdRef.current += 1;
-    shouldRestartRef.current = false;
-    clearTimeout(restartTimeoutRef.current);
     cleanupRecognition(true);
 
     if (forceProcess) {
@@ -368,9 +353,8 @@ export default function App() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setStatusText("Voice requires Chrome browser"); return; }
 
-    hardResetMic();
+    cleanupRecognition(true);
     sessionIdRef.current += 1;
-    shouldRestartRef.current = true;
     interimRef.current = "";
     setInterim("");
 
